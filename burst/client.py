@@ -254,7 +254,7 @@ class Client:
         self._cookies_filename = self._locate_cookies(url)
         if os.path.exists(self._cookies_filename):
             try:
-                self._cookies.load(self._cookies_filename)
+                self._cookies.load(self._cookies_filename, ignore_discard=True, ignore_expires=True)
             except Exception as e:
                 log.debug("Reading cookies error: %s" % repr(e))
 
@@ -265,14 +265,23 @@ class Client:
         return False
 
     def add_cookie(self, cookie):
-        cookie_obj = create_cookie(domain=cookie["domain"], name=cookie["name"], value=cookie["value"], path=cookie["path"], secure=cookie["secure"], expires=cookie["expirationDate"], discard=False, rest=cookie["rest"])
+        cookie_obj = create_cookie(
+            domain=cookie["domain"], 
+            name=cookie["name"], 
+            value=cookie["value"], 
+            path=cookie["path"], 
+            secure=cookie["secure"], 
+            expires=cookie["expirationDate"], 
+            discard=False, 
+            rest=cookie["rest"]
+        )
         self._cookies.set_cookie(cookie_obj)
 
     def save_cookies(self):
         self._cookies_filename = self._locate_cookies(self.url)
 
         try:
-            self._cookies.save(self._cookies_filename)
+            self._cookies.save(self._cookies_filename, ignore_discard=True, ignore_expires=True)
         except Exception as e:
             log.debug("Saving cookies error: %s" % repr(e))
 
@@ -382,7 +391,6 @@ class Client:
             if self.status != 200:
                 log.debug("Failed response content for %s : %s" % (repr(url), str(self.content)))
 
-            # Наш главный патч: решаем через FlareSolverr и ВОЗВРАЩАЕМ РЕЗУЛЬТАТ!
             if attempt == 0 and self._solve_challenge(url, method, post_data, headers):
                 return self.status == 200
 
@@ -398,11 +406,19 @@ class Client:
         if not is_challenge(self.status, self.content):
             return False
 
+        # Подгружаем свежие куки из файла/сессии перед отправкой во FlareSolverr
+        self._read_cookies(url)
+
         log.debug("Cloudflare challenge detected for %s (status %s), solving via FlareSolverr..." % (repr(url), str(self.status)))
         solution = solve(flaresolverr_url, url, method=method, post_data=post_data, headers=headers, client=self)
         if not solution:
             return False
-        return apply_solution(self, solution)
+        
+        success = apply_solution(self, solution)
+        if success:
+            # Обновляем активную сессию свежими куками от FlareSolverr
+            self.session.cookies = self._cookies
+        return success
 
     def login(self, root_url, url, data, headers, fails_with, prerequest=None):
         if not url.startswith('http'):
@@ -428,6 +444,8 @@ class Client:
                 except Exception:
                     return False
 
+            # Сохраняем куки авторизации (bb_session) сразу на диск и в памяти
+            self.save_cookies()
             return True
 
         return False
