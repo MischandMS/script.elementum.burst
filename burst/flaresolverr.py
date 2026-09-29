@@ -29,13 +29,15 @@ CHALLENGE_INDICATORS = [
     "cf-challenge",
     "challenge-platform",
     "__cf_chl",
+    "один момент…",
+    "один момент..."
 ]
 CHALLENGE_STATUSES = (403, 503)
 
 
 def is_challenge(status, content):
-    if status not in CHALLENGE_STATUSES:
-        return False
+    if status in CHALLENGE_STATUSES:
+        return True
     if not content:
         return False
 
@@ -57,7 +59,6 @@ def solve(endpoint, url, method="GET", post_data=None, headers=None, max_timeout
             "maxTimeout": max_timeout,
         }
 
-        # Формируем домен из URL для привязки кук
         parsed_url = urlparse(url)
         target_domain = parsed_url.netloc.split(":")[0]
 
@@ -65,7 +66,6 @@ def solve(endpoint, url, method="GET", post_data=None, headers=None, max_timeout
         cookies_seen = set()
 
         if client:
-            # 1. Берем куки из client._cookies
             if hasattr(client, '_cookies') and client._cookies:
                 for cookie in client._cookies:
                     if cookie.name not in cookies_seen:
@@ -78,22 +78,8 @@ def solve(endpoint, url, method="GET", post_data=None, headers=None, max_timeout
                             "path": cookie.path or "/"
                         })
 
-            # 2. Добираем куки из client.session.cookies
-            if hasattr(client, 'session') and client.session.cookies:
-                for cookie in client.session.cookies:
-                    if cookie.name not in cookies_seen:
-                        cookies_seen.add(cookie.name)
-                        c_domain = cookie.domain if cookie.domain else target_domain
-                        req_cookies.append({
-                            "name": cookie.name,
-                            "value": cookie.value,
-                            "domain": c_domain.lstrip("."),
-                            "path": cookie.path or "/"
-                        })
-
         if req_cookies:
             payload["cookies"] = req_cookies
-            log.debug("FlareSolverr sending %d cookies (including session) for %s" % (len(req_cookies), target_domain))
 
         if command == "request.post" and post_data:
             if isinstance(post_data, dict):
@@ -104,7 +90,7 @@ def solve(endpoint, url, method="GET", post_data=None, headers=None, max_timeout
             payload["headers"] = headers
 
         log.debug("FlareSolverr %s request for %s to %s" % (command, repr(url), repr(api_url)))
-        response = requests.post(api_url, json=payload, timeout=(max_timeout / 1000.0) + 10)
+        response = requests.post(api_url, json=payload, timeout=(max_timeout / 1000.0) + 15)
         data = response.json()
 
         if data.get("status") != "ok":
@@ -116,7 +102,13 @@ def solve(endpoint, url, method="GET", post_data=None, headers=None, max_timeout
             log.error("FlareSolverr returned no solution for %s" % repr(url))
             return None
 
-        log.debug("FlareSolverr solved %s with status %s" % (repr(url), solution.get("status")))
+        # ПРОВЕРКА: Если FlareSolverr вернул 200, но в HTML ВСЁ ЕЩЁ висит челлендж Cloudflare — считаем решение фейковым
+        html_resp = solution.get("response", "")
+        if is_challenge(solution.get("status"), html_resp):
+            log.error("FlareSolverr returned 200, but Cloudflare Challenge is STILL PRESENT in HTML response!")
+            return None
+
+        log.debug("FlareSolverr successfully solved %s" % repr(url))
         return solution
     except Exception as e:
         import traceback
@@ -168,6 +160,7 @@ def apply_solution(client, solution):
         user_agent = solution.get("userAgent")
         if user_agent:
             client.user_agent = user_agent
+            client.session.headers["User-Agent"] = user_agent
             change_agent(user_agent)
 
         cookies = solution.get("cookies")
