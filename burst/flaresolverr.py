@@ -8,10 +8,11 @@ from elementum.provider import log, get_setting
 from .client import change_agent
 
 if PY3:
-    from urllib.parse import urlencode
+    from urllib.parse import urlparse, urlencode
     unicode = str
 else:
     from urllib import urlencode
+    from urlparse import urlparse
     unicode = unicode
 
 flaresolverr_enabled = get_setting("flaresolverr_enabled", bool)
@@ -56,18 +57,43 @@ def solve(endpoint, url, method="GET", post_data=None, headers=None, max_timeout
             "maxTimeout": max_timeout,
         }
 
-        # Пробрасываем куки авторизации (Cookie Sync / Session) во FlareSolverr
-        if client and hasattr(client, '_cookies') and client._cookies:
-            req_cookies = []
-            for cookie in client._cookies:
-                req_cookies.append({
-                    "name": cookie.name,
-                    "value": cookie.value,
-                    "domain": cookie.domain,
-                    "path": cookie.path
-                })
-            if req_cookies:
-                payload["cookies"] = req_cookies
+        # Формируем домен из URL для привязки кук
+        parsed_url = urlparse(url)
+        target_domain = parsed_url.netloc.split(":")[0]
+
+        req_cookies = []
+        cookies_seen = set()
+
+        if client:
+            # 1. Берем куки из client._cookies
+            if hasattr(client, '_cookies') and client._cookies:
+                for cookie in client._cookies:
+                    if cookie.name not in cookies_seen:
+                        cookies_seen.add(cookie.name)
+                        c_domain = cookie.domain if cookie.domain else target_domain
+                        req_cookies.append({
+                            "name": cookie.name,
+                            "value": cookie.value,
+                            "domain": c_domain.lstrip("."),
+                            "path": cookie.path or "/"
+                        })
+
+            # 2. Добираем куки из client.session.cookies
+            if hasattr(client, 'session') and client.session.cookies:
+                for cookie in client.session.cookies:
+                    if cookie.name not in cookies_seen:
+                        cookies_seen.add(cookie.name)
+                        c_domain = cookie.domain if cookie.domain else target_domain
+                        req_cookies.append({
+                            "name": cookie.name,
+                            "value": cookie.value,
+                            "domain": c_domain.lstrip("."),
+                            "path": cookie.path or "/"
+                        })
+
+        if req_cookies:
+            payload["cookies"] = req_cookies
+            log.debug("FlareSolverr sending %d cookies (including session) for %s" % (len(req_cookies), target_domain))
 
         if command == "request.post" and post_data:
             if isinstance(post_data, dict):
