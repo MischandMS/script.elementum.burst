@@ -406,17 +406,16 @@ class Client:
         if not is_challenge(self.status, self.content):
             return False
 
-        # Подгружаем свежие куки из файла/сессии перед отправкой во FlareSolverr
         self._read_cookies(url)
 
         log.debug("Cloudflare challenge detected for %s (status %s), solving via FlareSolverr..." % (repr(url), str(self.status)))
         solution = solve(flaresolverr_url, url, method=method, post_data=post_data, headers=headers, client=self)
         if not solution:
+            log.error("FlareSolverr failed to pass Cloudflare for %s" % repr(url))
             return False
         
         success = apply_solution(self, solution)
         if success:
-            # Обновляем активную сессию свежими куками от FlareSolverr
             self.session.cookies = self._cookies
         return success
 
@@ -444,7 +443,6 @@ class Client:
                 except Exception:
                     return False
 
-            # Сохраняем куки авторизации (bb_session) сразу на диск и в памяти
             self.save_cookies()
             return True
 
