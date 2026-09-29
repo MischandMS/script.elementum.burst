@@ -45,7 +45,7 @@ def is_challenge(status, content):
     return False
 
 
-def solve(endpoint, url, method="GET", post_data=None, headers=None, max_timeout=DEFAULT_MAX_TIMEOUT):
+def solve(endpoint, url, method="GET", post_data=None, headers=None, max_timeout=DEFAULT_MAX_TIMEOUT, client=None):
     try:
         api_url = "%s/v1" % (endpoint or flaresolverr_url or DEFAULT_ENDPOINT)
         command = "request.post" if method and method.upper() == "POST" else "request.get"
@@ -55,6 +55,20 @@ def solve(endpoint, url, method="GET", post_data=None, headers=None, max_timeout
             "url": url,
             "maxTimeout": max_timeout,
         }
+
+        # Пробрасываем куки авторизации (Cookie Sync / Session) во FlareSolverr
+        if client and hasattr(client, '_cookies') and client._cookies:
+            req_cookies = []
+            for cookie in client._cookies:
+                req_cookies.append({
+                    "name": cookie.name,
+                    "value": cookie.value,
+                    "domain": cookie.domain,
+                    "path": cookie.path
+                })
+            if req_cookies:
+                payload["cookies"] = req_cookies
+
         if command == "request.post" and post_data:
             if isinstance(post_data, dict):
                 payload["postData"] = urlencode(post_data)
@@ -141,7 +155,6 @@ def apply_solution(client, solution):
                 log.debug("FlareSolverr merged %d cookies into the client" % added)
                 client.save_cookies()
 
-        # Забираем HTML-код страницы напрямую из FlareSolverr!
         client.content = solution.get("response", "")
         client.status = solution.get("status", 200)
 
@@ -160,5 +173,5 @@ def pre_solve(client, url):
         return False
 
     log.debug("FlareSolverr pre-solving %s" % repr(url))
-    solution = solve(flaresolverr_url, url, method="GET")
+    solution = solve(flaresolverr_url, url, method="GET", client=client)
     return apply_solution(client, solution)
