@@ -399,7 +399,7 @@ class Client:
             return False
 
         log.debug("Cloudflare challenge detected for %s (status %s), solving via FlareSolverr..." % (repr(url), str(self.status)))
-        solution = solve(flaresolverr_url, url, method=method, post_data=post_data, headers=headers)
+        solution = solve(flaresolverr_url, url, method=method, post_data=post_data, headers=headers, client=self)
         if not solution:
             return False
         return apply_solution(self, solution)
