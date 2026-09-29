@@ -156,6 +156,7 @@ def apply_solution(client, solution):
                 client.save_cookies()
 
         client.content = solution.get("response", "")
+        log.debug("FlareSolverr Response Preview: %s" % repr(client.content[:500]))
         client.status = solution.get("status", 200)
 
         return True
